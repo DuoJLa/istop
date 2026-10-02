@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # iperf3 服务管理工具 (istop)
-# 快捷键: istop  |  一键安装: sudo curl ... -o /usr/local/bin/istop
+# 快捷键: istop  |  一键安装: bash <(curl -fsSL https://raw.githubusercontent.com/DuoJLa/istop/main/istop)
 #
 # [1] 停止服务 + 关闭自启动 — 最常用，停掉 iperf3 并禁止开机自启
 # [2] 查看状态 (只读)       — 仅查看，不做任何更改
@@ -10,6 +10,25 @@
 # [5] 帮助说明              — 查看本说明和安装命令
 # [0] 退出
 # ============================================================================
+
+# ---- 自动安装 (首次通过管道执行时) ----
+INSTALL_PATH="/usr/local/bin/istop"
+RAW_URL="https://raw.githubusercontent.com/DuoJLa/istop/main/istop"
+
+if [ "$(basename "$0" 2>/dev/null)" != "istop" ] || [ ! -x "$INSTALL_PATH" ]; then
+    echo ">>> 首次运行，正在安装 istop ..."
+    if [ "$(id -u)" != "0" ]; then
+        echo "需要 root 权限。请用 sudo 重新运行:"
+        echo "  sudo bash <(curl -fsSL $RAW_URL)"
+        exit 1
+    fi
+    curl -fsSL "$RAW_URL" -o "$INSTALL_PATH" \
+        && chmod +x "$INSTALL_PATH" \
+        && echo "安装完成！启动菜单..." \
+        && exec "$INSTALL_PATH"
+    echo "安装失败，请检查网络连接。"
+    exit 1
+fi
 
 set -u
 
@@ -135,7 +154,7 @@ do_help() {
     echo -e "  ${C_CYAN}快捷启动:${C_RESET} 在终端输入 ${C_GREEN}istop${C_RESET} 即可启动本工具"
     echo
     echo -e "  ${C_CYAN}一键安装:${C_RESET}"
-    echo -e "  ${C_DIM}sudo curl -fsSL <RAW_URL> -o /usr/local/bin/istop && sudo chmod +x /usr/local/bin/istop${C_RESET}"
+    echo -e "  ${C_DIM}bash <(curl -fsSL $RAW_URL)${C_RESET}"
     echo
     echo -e "  ${C_CYAN}选项说明:${C_RESET}"
     echo -e "  ${C_BLUE}[1]${C_RESET} 停止服务 + 关闭自启动 — 最常用, 停掉 iperf3 并禁止开机自启"
@@ -144,7 +163,7 @@ do_help() {
     echo -e "  ${C_BLUE}[4]${C_RESET} 恢复自启动并启动服务  — 撤销 [1] 的操作"
     echo -e "  ${C_BLUE}[0]${C_RESET} 退出"
     echo
-    echo -e "  ${C_DIM}GitHub 托管后替换上面的 <RAW_URL> 即可。${C_RESET}"
+    echo -e "  ${C_DIM}安装后输入 ${C_GREEN}istop${C_DIM} 即可启动。${C_RESET}"
 }
 
 # ---- 菜单 ----
