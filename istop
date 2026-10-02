@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# ============================================================================
+# iperf3 服务管理工具 (istop)
+# 快捷键: istop  |  一键安装: sudo curl ... -o /usr/local/bin/istop
+#
+# [1] 停止服务 + 关闭自启动 — 最常用，停掉 iperf3 并禁止开机自启
+# [2] 查看状态 (只读)       — 仅查看，不做任何更改
+# [3] 彻底卸载 (含软件包)   — 停止+禁用+删服务文件+卸载软件包 (不可逆)
+# [4] 恢复自启动并启动服务  — 撤销 [1] 的操作
+# [5] 帮助说明              — 查看本说明和安装命令
+# [0] 退出
+# ============================================================================
+
+set -u
+
+SERVICE="iperf3.service"
+PORT="5201"
+
+# ---- 终端颜色 ----
+if [ -t 1 ]; then
+    C_RESET='\033[0m'; C_BOLD='\033[1m'; C_GREEN='\033[32m'; C_YELLOW='\033[33m'
+    C_RED='\033[31m'; C_CYAN='\033[36m'; C_DIM='\033[2m'; C_BLUE='\033[34m'
+else
+    C_RESET=''; C_BOLD=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_CYAN=''; C_DIM=''; C_BLUE=''
+fi
+
+# ---- 前置检查 ----
+check_system() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo -e "${C_RED}错误: 未检测到 systemd，本工具仅适用于 systemd 系统。${C_RESET}"
+        exit 2
+    fi
+    if ! command -v iperf3 >/dev/null 2>&1; then
+        echo -e "${C_YELLOW}提示: 系统中未安装 iperf3，无需处理。${C_RESET}"
+        exit 0
+    fi
+}
+
+# ---- 获取状态 ----
+get_status() {
+    if systemctl is-active "$SERVICE" >/dev/null 2>&1; then
+        STATUS_ACTIVE="${C_GREEN}active (running)${C_RESET}"
+    else
+        STATUS_ACTIVE="inactive"
+    fi
+    if systemctl is-enabled "$SERVICE" >/dev/null 2>&1; then
+        STATUS_ENABLED="${C_GREEN}enabled${C_RESET}"
+    else
+        STATUS_ENABLED="disabled"
+    fi
+    if ss -tln 2>/dev/null | grep -q ":$PORT "; then
+        STATUS_PORT="${C_GREEN}正在监听${C_RESET}"
+    else
+        STATUS_PORT="未监听"
+    fi
+    if command -v iperf3 >/dev/null 2>&1; then
+        STATUS_VER=$(iperf3 --version 2>/dev/null | head -1)
+    else
+        STATUS_VER="未安装"
+    fi
+}
+
+print_status() {
+    get_status
+    echo -e "  ${C_CYAN}服务状态:${C_RESET}   $STATUS_ACTIVE"
+    echo -e "  ${C_CYAN}开机自启:${C_RESET}   $STATUS_ENABLED"
+    echo -e "  ${C_CYAN}端口 $PORT:${C_RESET}   $STATUS_PORT"
+    echo -e "  ${C_CYAN}版本:${C_RESET}       $STATUS_VER"
+}
+
+# ---- 操作函数 ----
+do_stop() {
+    local changed=false
+    echo -e "\n${C_BOLD}▸ [1] 停止服务 + 关闭自启动${C_RESET}"
+    if systemctl stop "$SERVICE" 2>/dev/null; then
+        echo -e "  ${C_GREEN}✓${C_RESET} 服务已停止"; changed=true
+    else
+        echo -e "  ${C_YELLOW}•${C_RESET} 服务本就未运行, 无需操作"
+    fi
+    if systemctl disable "$SERVICE" 2>/dev/null; then
+        echo -e "  ${C_GREEN}✓${C_RESET} 开机自启已关闭"; changed=true
+    else
+        echo -e "  ${C_YELLOW}•${C_RESET} 自启本就未启用, 无需操作"
+    fi
+    $changed && echo -e "\n  ${C_BLUE}提示:${C_RESET} 操作完成, 当前状态见上方状态栏。"
+}
+
+do_status() {
+    echo -e "\n${C_BOLD}▸ [2] 当前状态 (只读, 未做任何更改)${C_RESET}"
+    echo
+    print_status
+}
+
+do_purge() {
+    echo -e "\n${C_BOLD}${C_RED}▸ [3] 彻底卸载 (含软件包, 不可逆)${C_RESET}"
+    echo
+    read -r -p "  确认彻底卸载 iperf3? (输入 yes 继续): " confirm
+    if [ "$confirm" != "yes" ]; then
+        echo -e "  ${C_YELLOW}已取消。${C_RESET}"
+        return
+    fi
+    systemctl stop "$SERVICE" 2>/dev/null
+    systemctl disable "$SERVICE" 2>/dev/null
+    rm -f /usr/lib/systemd/system/"$SERVICE" /lib/systemd/system/"$SERVICE"
+    systemctl daemon-reload 2>/dev/null
+    if command -v apt >/dev/null 2>&1; then
+        apt purge -y iperf3 2>&1 | tail -2
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf remove -y iperf3 2>&1 | tail -2
+    elif command -v apk >/dev/null 2>&1; then
+        apk del iperf3 2>&1 | tail -2
+    else
+        echo -e "  ${C_YELLOW}!${C_RESET} 未识别的包管理器, 请手动卸载 iperf3"
+    fi
+    echo -e "  ${C_GREEN}✓${C_RESET} 卸载完成。"
+}
+
+do_restore() {
+    echo -e "\n${C_BOLD}▸ [4] 恢复自启动并启动服务${C_RESET}"
+    if systemctl enable "$SERVICE" 2>/dev/null; then
+        echo -e "  ${C_GREEN}✓${C_RESET} 自启动已恢复"
+    else
+        echo -e "  ${C_RED}✗${C_RESET} 启用失败 (服务文件可能已被删除)"
+    fi
+    if systemctl start "$SERVICE" 2>/dev/null; then
+        echo -e "  ${C_GREEN}✓${C_RESET} 服务已启动"
+    else
+        echo -e "  ${C_RED}✗${C_RESET} 启动失败"
+    fi
+}
+
+do_help() {
+    echo -e "\n${C_BOLD}▸ [5] 帮助说明${C_RESET}"
+    echo
+    echo -e "  ${C_CYAN}快捷启动:${C_RESET} 在终端输入 ${C_GREEN}istop${C_RESET} 即可启动本工具"
+    echo
+    echo -e "  ${C_CYAN}一键安装:${C_RESET}"
+    echo -e "  ${C_DIM}sudo curl -fsSL <RAW_URL> -o /usr/local/bin/istop && sudo chmod +x /usr/local/bin/istop${C_RESET}"
+    echo
+    echo -e "  ${C_CYAN}选项说明:${C_RESET}"
+    echo -e "  ${C_BLUE}[1]${C_RESET} 停止服务 + 关闭自启动 — 最常用, 停掉 iperf3 并禁止开机自启"
+    echo -e "  ${C_BLUE}[2]${C_RESET} 查看状态 (只读)       — 仅查看, 不做任何更改"
+    echo -e "  ${C_BLUE}[3]${C_RESET} 彻底卸载 (含软件包)   — 停止+禁用+删服务文件+卸载软件包 ${C_RED}(不可逆)${C_RESET}"
+    echo -e "  ${C_BLUE}[4]${C_RESET} 恢复自启动并启动服务  — 撤销 [1] 的操作"
+    echo -e "  ${C_BLUE}[0]${C_RESET} 退出"
+    echo
+    echo -e "  ${C_DIM}GitHub 托管后替换上面的 <RAW_URL> 即可。${C_RESET}"
+}
+
+# ---- 菜单 ----
+show_menu() {
+    clear 2>/dev/null || true
+    echo -e "  ${C_BOLD}╔══════════════════════════════════════╗${C_RESET}"
+    echo -e "  ${C_BOLD}║        iperf3 服务管理工具          ║${C_RESET}"
+    echo -e "  ${C_BOLD}║        快捷启动: ${C_GREEN}istop${C_BOLD}               ║${C_RESET}"
+    echo -e "  ${C_BOLD}╚══════════════════════════════════════╝${C_RESET}"
+    echo
+    print_status
+    echo
+    echo -e "  ${C_BLUE}[1]${C_RESET} 停止服务 + 关闭自启动"
+    echo -e "  ${C_BLUE}[2]${C_RESET} 查看状态 (只读)"
+    echo -e "  ${C_BLUE}[3]${C_RESET} 彻底卸载 (含软件包) ${C_RED}[不可逆]${C_RESET}"
+    echo -e "  ${C_BLUE}[4]${C_RESET} 恢复自启动并启动服务"
+    echo -e "  ${C_BLUE}[5]${C_RESET} 帮助说明"
+    echo -e "  ${C_DIM}[0]${C_RESET} 退出"
+    echo
+}
+
+# ---- 主循环 ----
+main() {
+    check_system
+
+    local choice
+    while true; do
+        show_menu
+        read -r -p "  请输入序号 [0-5]: " choice 2>/dev/null || { echo; exit 0; }
+
+        case "${choice:-}" in
+            1) do_stop ;;
+            2) do_status ;;
+            3) do_purge ;;
+            4) do_restore ;;
+            5) do_help ;;
+            0) echo -e "\n  已退出。${C_RESET}"; exit 0 ;;
+            *) echo -e "  ${C_YELLOW}无效选项, 请重新输入${C_RESET}" ;;
+        esac
+
+        echo
+        read -r -p "  按回车返回菜单..." _
+    done
+}
+
+main
